@@ -1,5 +1,6 @@
 (ns songpark.mqtt
-  (:require [clojurewerkz.machine-head.client :as mh]
+  (:require [clojure.core.async :as async]
+            [clojurewerkz.machine-head.client :as mh]
             [cognitect.transit :as transit]
             [com.stuartsierra.component :as component]
             [songpark.common.communication :refer [write-handlers]]
@@ -20,7 +21,7 @@
 (defmulti handle-message :message/type)
 
 (defmethod handle-message :default [msg]
-  (log/debug ::handle-message :default msg))
+  (log/warn ::handle-message :default msg))
 
 (defprotocol IMqttClient
   (connected? [this])
@@ -185,7 +186,8 @@
     ;; TODO: Save request for timeout
     (swap! saved-requests assoc msg-id {:success-fn success-fn
                                         :error-fn error-fn
-                                        :t (t/now)})
+                                        :timestamp (t/now)
+                                        :timeout timeout})
     (log/debug {:topic/request (get-request-topic id)
                 :topic/response (get-response-topic (:id mqtt-client))
                 :id (:id mqtt-client)
@@ -208,8 +210,43 @@
   (log/info "Unsubscribing from topics" topics)
   (mh/unsubscribe @client topics))
 
+(defn check-timeouts [saved-requests]
+  (let [now (t/now)]
+    (doseq [[id {:keys [error-fn timestamp timeout]}] @saved-requests]
+      (when (t/< now (t/>> timestamp (t/new-duration timeout :millis)))
+        (error-fn {:message/id id})
+        (swap! saved-requests dissoc id)))))
 
-(defrecord MqttClient [config topics client id
+(defn- handle-timeout [saved-requests timeout-in-ms]
+  (let [c (async/chan (async/sliding-buffer 10))]
+    (async/go-loop [tc (async/timeout timeout-in-ms)]
+      (let [[v ch] (async/alts! [c tc])]
+        ;; uncomment for debugging, otherwise leave alone.
+        ;; super spammy
+        #_(log/debug {:v v
+                    :ch ch})
+        (cond (and (identical? ch c)
+                   (= v :close!))
+              (do (log/debug "Closing handle-timeout channel")
+                  (async/close! c))
+
+              :else
+              (do (try
+                    (check-timeouts saved-requests)
+                    (catch #?(:clj Exception :cljs js/Error) e
+                      (log/warn ::handle-timeout {:exception e
+                                                  :data (ex-data e)
+                                                  :message (ex-message e)})))
+                  (recur (async/timeout timeout-in-ms))))))
+    c))
+
+(comment
+  (def c-tmp (atom (handle-timeout (atom {}) 1000)))
+  (async/put! @c-tmp :close!)
+  )
+
+
+(defrecord MqttClient [config topics client id c-timeout
                        injection-ks
                        on-message
                        on-connect-complete
@@ -224,9 +261,11 @@
       (do (log/info "Starting MQTT client")
           (log/info (str "Connecting to broker" (select-keys config [:schema :host :port])))
           (let [id (get config :id (get-id))
+                saved-requests* (atom {})
                 new-this (assoc this
+                                :c-timeout (handle-timeout saved-requests* (get config :default-timeout 100))
                                 :id id
-                                :saved-requests (atom {})
+                                :saved-requests saved-requests*
                                 ;; setup the topics now. when the client has connected successfully,
                                 ;; they will be subscribed to
                                 :topics (atom {(str id "/request") (get config :default-qos 2)
@@ -240,7 +279,9 @@
       this
       (do (log/info "Stopping MQTT client")
           (disconnect* this)
+          (async/put! c-timeout :close!)
           (assoc this
+                 :c-timeout nil
                  :id nil
                  :saved-requests nil
                  :client nil

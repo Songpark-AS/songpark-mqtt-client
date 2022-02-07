@@ -15,6 +15,13 @@
   (if ?reply-fn
     (?reply-fn reply-message)
     (log/error "NO ?reply-fn FOUND!")))
+(defmethod mqtt/handle-message :reply-and-sleep [{:keys [?reply-fn sleep] :as msg}]
+  (log/info :reply-and-sleep (str "Sleeping for " sleep " ms"))
+  (Thread/sleep sleep)
+  (log/info :reply-and-sleep "Now replying after the sleep")
+  (if ?reply-fn
+    (?reply-fn reply-message)
+    (log/error "NO ?reply-fn FOUND!")))
 
 
 (defn get-config []
@@ -71,8 +78,8 @@
         (mqtt/request @client (:id @client) msg success nil 500)
         (Thread/sleep 200)
         (is (= @reply-catch reply-message))))
-    (testing "request/response happy path"
-      (let [msg {:message/type :reply :bar :baz}
+    (testing "request/response timeout"
+      (let [msg {:message/type :reply-and-sleep :sleep 1000}
             reply-catch (atom nil)
             success (fn [returned-message]
                       (reset! reply-catch (select-keys returned-message (keys reply-message))))

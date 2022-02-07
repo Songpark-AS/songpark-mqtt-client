@@ -2,6 +2,10 @@
   :description "MQTT library for Songpark"
 
   :dependencies [[org.clojure/clojure "1.10.3"]
+                 ;; time
+                 [tick "0.5.0-RC1"]
+                 ;; core async. used for request/response pattern
+                 [org.clojure/core.async "1.5.648"]
                  ;; logging
                  [com.taoensso/timbre "5.1.2" :scope "provided"]
                  ;; clojure mqtt
