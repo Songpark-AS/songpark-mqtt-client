@@ -10,6 +10,5 @@ pom.xml.asc
 /.nrepl-port
 /.prepl-port
 
-
-#ignore docker
-.docker
+node_modules
+package.json
