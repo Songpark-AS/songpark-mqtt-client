@@ -3,8 +3,7 @@
             [com.stuartsierra.component :as component]
             [songpark.mqtt :as mqtt]
             [taoensso.timbre :as log]
-            [cljs.test :include-macros true :refer [async
-                                                    deftest
+            [cljs.test :include-macros true :refer [deftest
                                                     is
                                                     testing]]))
 
@@ -16,21 +15,22 @@
 (defmethod mqtt/handle-message :foo/cljs [msg]
   (reset! catch msg))
 (defmethod mqtt/handle-message :reply/cljs [{:keys [?reply-fn] :as msg}]
+  (log/debug :mqtt/handle-message :reply/js)
   (if ?reply-fn
     (?reply-fn reply-message)
+    (log/error "NO ?reply-fn FOUND!")))
+
+(defmethod mqtt/handle-message :reply-and-sleep/cljs [{:keys [?reply-fn sleep] :as msg}]
+  (log/debug :mqtt/handle-message :reply-and-sleep/js)
+  (if ?reply-fn
+    (js/setTimeout #(do
+                      (log/debug "Sending a late reply")
+                      (?reply-fn reply-message)) sleep)
     (log/error "NO ?reply-fn FOUND!")))
 
 (defmethod mqtt/handle-message :die/cljs [{:keys [?reply-fn] :as msg}]
   ;; do nothing. we just want to stop the spamming from :default
   )
-
-(defmethod mqtt/handle-message :reply-and-sleep/cljs [{:keys [?reply-fn sleep] :as msg}]
-  (log/info :reply-and-sleep (str "Sleeping for " sleep " ms"))
-  ;; (Thread/sleep sleep)
-  (log/info :reply-and-sleep "Now replying after the sleep")
-  (if ?reply-fn
-    (?reply-fn reply-message)
-    (log/error "NO ?reply-fn FOUND!")))
 
 
 (defn get-config
@@ -94,23 +94,39 @@
         (let [msg {:message/type :reply/cljs :bar :baz}
               reply-catch (atom nil)
               success (fn [returned-message]
+                        (log/info "I have returned")
                         (reset! reply-catch (select-keys returned-message (keys reply-message))))]
           (mqtt/request @client (:id @client) msg success nil 500)
 
-          ;; sleep for 200ms to catch the message
-          (<! (timeout 200))
+          ;; sleep in order to catch the message
+          ;; needs to be a staggered approach, as the timeout allows for
+          ;; the network traffic to happen, and then let the nodejs single thread
+          ;; continue with its work before it gets trapped in a timeout (again),
+          ;; allowing it to run any callbacks before continuing with the the code below
+          (<! (timeout 500))
+          (<! (timeout 500))
+          (<! (timeout 500))
+          (<! (timeout 500))
           
           (is (= @reply-catch reply-message))))
-      ;; (testing "request/response timeout"
-      ;;   (let [msg {:message/type :reply-and-sleep/cljs :sleep 1000}
-      ;;         reply-catch (atom nil)
-      ;;         success (fn [returned-message]
-      ;;                   (reset! reply-catch (select-keys returned-message (keys reply-message))))
-      ;;         error (fn [returned-message]
-      ;;                   (reset! reply-catch {:timeout? true}))]
-      ;;     (mqtt/request @client (:id @client) msg success error 200)
-      ;;     (Thread/sleep 500)
-      ;;     (is (= @reply-catch {:timeout? true}))))
+      (testing "request/response timeout"
+        (let [msg {:message/type :reply-and-sleep/cljs :sleep 2000}
+              reply-catch-timeout (atom nil)
+              success (fn [returned-message]
+                        (reset! reply-catch-timeout (select-keys returned-message (keys reply-message))))
+              error (fn [returned-message]
+                        (reset! reply-catch-timeout {:timeout? true}))]
+          (mqtt/request @client (:id @client) msg success error 500)
+
+          ;; sleep in order to catch the message
+          ;; needs to be a staggered approach, as the timeout allows for
+          ;; the network traffic to happen, and then let the nodejs single thread
+          ;; continue with its work before it gets trapped in a timeout (again),
+          ;; allowing it to run any callbacks before continuing with the the code below
+          (<! (timeout 500))
+          (<! (timeout 500))
+          
+          (is (= @reply-catch-timeout {:timeout? true}))))
       (testing "stop"
         ;; sleep for 1000ms to catch the message
         (<! (timeout 1000))

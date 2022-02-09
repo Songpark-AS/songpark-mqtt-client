@@ -77,7 +77,7 @@
                      (let [{:keys [topics on-message]} mqtt-client]
                        (when-not (empty? @topics)
                          (do (subscribe mqtt-client @topics)
-                             (log/debug "Resubscribed to topics" @topics)))))
+                             (log/debug "(re-)subscribed to topics" @topics)))))
                    :on-connection-lost (fn [& args]
                                          (log/debug ::on-connection-lost {:args args}))
                    :on-delivery-complete (fn [& args]
@@ -85,7 +85,11 @@
                    :on-unhandled-message (fn [& args]
                                            (log/debug ::on-unhandled-message {:args args}))}
             :cljs {:on-success (fn [resp]
-                                 (log/debug ::onSuccess "Connection completed" {:resp resp}))
+                                 (log/debug ::onSuccess "Connection completed" {:resp resp})
+                                 (let [{:keys [topics on-message]} mqtt-client]
+                                   (when-not (empty? @topics)
+                                     (do (subscribe mqtt-client @topics)
+                                         (log/debug "(re-)subscribed to topics" @topics)))))
                    :on-failure (fn [resp]
                                  (log/debug ::onFailure "Connection failed" {:resp resp}))
                    :on-connection-lost (fn [resp]
@@ -213,11 +217,11 @@
                                                     message/id
                                                     message.response/topic
                                                     message.type/real] :as message}]
-  (log/debug :message/request {:id id
+  #_(log/debug :message/request {:id id
                                :response/topic topic
                                :real real})
   (let [?reply-fn (fn [message]
-                    (log/debug :handle-message.message/request :?reply-fn message)
+                    #_(log/debug :handle-message.message/request :?reply-fn message)
                     (let [message* (assoc message
                                           :message.response/to-id id
                                           :message/type :message/response)]
@@ -231,13 +235,13 @@
 (defmethod handle-message :message/response [{:keys [mqtt-client
                                                      message.response/to-id]
                                               :as message}]
-  (log/debug :handle-message :message/response)
+  #_(log/debug :handle-message :message/response)
   (let [saved-requests (:saved-requests mqtt-client)]
-    (log/debug :handle-message.message/response {:saved-requests @saved-requests})
+    #_(log/debug :handle-message.message/response {:saved-requests @saved-requests})
     (when-let [saved-request (get @saved-requests to-id)]
-      (log/debug :handle.message/saved-request saved-request)
+      #_(log/debug :handle.message/saved-request saved-request)
       (let [{:keys [success-fn]} saved-request]
-        (log/debug :handle.message/success-fn success-fn)
+        #_(log/debug :handle.message/success-fn success-fn)
         (success-fn message))
       (swap! saved-requests dissoc to-id))))
 
@@ -257,7 +261,7 @@
                                         :error-fn error-fn
                                         :timestamp (t/now)
                                         :timeout timeout})
-    (log/debug {:topic/request (get-request-topic id)
+    #_(log/debug {:topic/request (get-request-topic id)
                 :topic/response (get-response-topic (:id mqtt-client))
                 :id (:id mqtt-client)
                 :message message*})
@@ -297,25 +301,39 @@
   #?(:clj  (mh/unsubscribe @client topics)
      :cljs "FIX"))
 
-(defn check-timeouts [saved-requests]
+(defn check-timeouts
+  "Saved requests from the request* function. max-time-in-ms is the maximum time allowed before a request is considered timed out, regardless of the timeout."
+  [saved-requests max-time-in-ms]
   (let [now (t/now)]
+    #_(log/debug :saved-requests @saved-requests)
     (doseq [[id {:keys [error-fn timestamp timeout]}] @saved-requests]
       #_(log/debug {:id id
                   :now now
                   :timestamp timestamp
+                  :max-time-in-ms max-time-in-ms
                   :future (t/>> timestamp (t/new-duration timeout :millis))
                   :true? (t/< now (t/>> timestamp (t/new-duration timeout :millis)))})
-      (when (t/< now (t/>> timestamp (t/new-duration timeout :millis)))
-        (error-fn {:message/id id})
+      ;; have we timed out? then run error-fn
+      (when (or (t/< now (t/>> timestamp (t/new-duration timeout :millis)))
+                (t/< now (t/>> timestamp (t/new-duration max-time-in-ms :millis))))
+        #_(log/debug :check-timeouts "Running cleanup of requests" {:error-fn error-fn
+                                                                  :now now
+                                                                  :id id
+                                                                  :timeout timeout
+                                                                  :max-time-in-ms max-time-in-ms})
+        (if error-fn
+          (error-fn {:message/id id
+                     :reason :timeout})
+          (log/warn "Missing error function"))
         (swap! saved-requests dissoc id)))))
 
-(defn- handle-timeout [saved-requests timeout-in-ms]
+(defn- handle-timeout [saved-requests timeout-in-ms max-time-in-ms]
   (let [c (async/chan (async/sliding-buffer 10))]
     (async/go-loop [tc (async/timeout timeout-in-ms)]
       (let [[v ch] (async/alts! [c tc])]
         ;; uncomment for debugging, otherwise leave alone.
         ;; super spammy
-        (log/debug {:v v
+        #_(log/debug {:v v
                     :ch ch})
         (cond (and (identical? ch c)
                    (= v :close!))
@@ -324,17 +342,23 @@
 
               :else
               (do (try
-                    (check-timeouts saved-requests)
+                    (check-timeouts saved-requests max-time-in-ms)
                     (catch #?@(:clj  [Exception e]
                                :cljs [js/Error e])
                         (log/warn ::handle-timeout {:exception e
                                                     :data (ex-data e)
                                                     :message (ex-message e)})))
                   (recur (async/timeout timeout-in-ms))))))
+    ;; run once before returning. otherwise the stuff in the go-loop won't
+    ;; run until the timeout has hit the first time
+    (check-timeouts saved-requests max-time-in-ms)
     c))
 
 (comment
-  (def c-tmp (atom (handle-timeout (atom {}) 1000)))
+  (def c-tmp (atom (handle-timeout (atom {1 {:error-fn (fn [data]
+                                                         (println data))
+                                             :timestamp (t/now)
+                                             :timeout 500}}) 1000 2000)))
   (async/put! @c-tmp :close!)
   )
 
@@ -355,7 +379,9 @@
           (let [id (get config :id (get-id))
                 saved-requests* (atom {})
                 new-this (assoc this
-                                :c-timeout (handle-timeout saved-requests* (get config :default-timeout 100))
+                                :c-timeout (handle-timeout saved-requests*
+                                                           (get config :request/default-timeout 100)
+                                                           (get config :request/max-time 5000))
                                 :id id
                                 :saved-requests saved-requests*
                                 ;; setup the topics now. when the client has connected successfully,
