@@ -1,0 +1,30 @@
+;; shadow-cljs configuration
+{:source-paths ["src"
+                "test"]
+ 
+ :dependencies [[org.clojure/clojurescript "1.11.4"]
+
+                ;; structure
+                [com.stuartsierra/component "1.0.0"]
+
+                ;; time
+                [tick "0.5.0-RC5"]
+
+                ;; core async. used for request/response pattern
+                [org.clojure/core.async "1.5.648"]
+
+                ;; logging
+                [com.taoensso/timbre "5.1.2"]
+
+                ;; ;; client id on MQTT
+                ;; [nano-id "1.0.0"]
+
+                ;; transit
+                [com.cognitect/transit-cljs "0.8.269"]]
+
+ :dev-http {8021 "out/test"}
+
+ :builds {:test {:target :browser-test
+                 :test-dir "out/test"
+                 :autorun true
+                 :runner-ns songpark.test-runner}}}
