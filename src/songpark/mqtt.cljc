@@ -1,12 +1,16 @@
 (ns songpark.mqtt
   (:require [clojure.core.async :as async]
-            [clojurewerkz.machine-head.client :as mh]
+            #?(:cljs ["paho-mqtt" :as Paho])
             [cognitect.transit :as transit]
             [com.stuartsierra.component :as component]
-            [songpark.common.communication :refer [write-handlers]]
+            #?(:cljs [goog.object :as gobj])
+            ;;[songpark.mqtt.client :as mh]
+            #?(:clj  [clojurewerkz.machine-head.client :as mh])
+            #?(:clj  [songpark.mqtt.transit :refer [write-handlers]]
+               :cljs [songpark.mqtt.transit :refer [writer reader]])
             [taoensso.timbre :as log]
             [tick.core :as t])
-  (:import [java.io ByteArrayInputStream ByteArrayOutputStream]))
+  #?(:clj (:import [java.io ByteArrayInputStream ByteArrayOutputStream])))
 
 (defn get-request-topic [id]
   (str id "/request"))
@@ -17,7 +21,6 @@
   #?(:clj  (java.util.UUID/randomUUID)
      :cljs (random-uuid)))
 
-(def handle-message nil)
 (defmulti handle-message :message/type)
 
 (defmethod handle-message :default [msg]
@@ -34,111 +37,177 @@
   nil
   (connected? [this]
     (throw (ex-info "Tried MQTT connected? with nil" {})))
-  (publish [this topic message]
-    (throw (ex-info "Tried MQTT send with nil" {:topic topic
-                                                :message message})))
-  (publish [this topic message qos]
-    (throw (ex-info "Tried MQTT send with nil" {:topic topic
-                                                :qos qos
-                                                :message message})))
-  (request [this id message success-fn error-fn timeout]
-    (throw (ex-info "Tried MQTT request with nil" {:id id
-                                                   :message message
-                                                   :success-fn success-fn
-                                                   :error-fn error-fn
-                                                   :timeout timeout})))
-  (request [this id message success-fn error-fn timeout qos]
-    (throw (ex-info "Tried MQTT request with nil" {:id id
-                                                   :message message
-                                                   :success-fn success-fn
-                                                   :error-fn error-fn
-                                                   :timeout timeout
-                                                   :qos qos})))
-  (subscribe [this topics]
-    (throw (ex-info "Tried MQTT subscribe with nil" {:topics topics})))
-  (subscribe [this topic qos]
-    (throw (ex-info "Tried MQTT subscribe with nil" {:topic topic
-                                                     :qos qos})))
+  (publish
+    ([this topic message]
+     (throw (ex-info "Tried MQTT send with nil" {:topic topic
+                                                 :message message})))
+    
+    ([this topic message qos]
+     (throw (ex-info "Tried MQTT send with nil" {:topic topic
+                                                 :qos qos
+                                                 :message message}))))
+  (request
+    ([this id message success-fn error-fn timeout]
+     (throw (ex-info "Tried MQTT request with nil" {:id id
+                                                    :message message
+                                                    :success-fn success-fn
+                                                    :error-fn error-fn
+                                                    :timeout timeout})))
+    ([this id message success-fn error-fn timeout qos]
+     (throw (ex-info "Tried MQTT request with nil" {:id id
+                                                    :message message
+                                                    :success-fn success-fn
+                                                    :error-fn error-fn
+                                                    :timeout timeout
+                                                    :qos qos}))))
+  (subscribe
+    ([this topics]
+     (throw (ex-info "Tried MQTT subscribe with nil" {:topics topics})))
+    ([this topic qos]
+     (throw (ex-info "Tried MQTT subscribe with nil" {:topic topic
+                                                      :qos qos}))))
   (unsubscribe [this topic-or-topics]
     (throw (ex-info "Tried MQTT unsubscribe with nil" {:topic-or-topics topic-or-topics}))))
 
 
 (defn get-default-options [mqtt-client]
-  {:on-connect-complete
-   (fn [& args]
-     (log/debug ::on-connect-complete "Connection completed")
-     (let [{:keys [topics on-message]} mqtt-client]
-       (when-not (empty? @topics)
-         (do (subscribe mqtt-client @topics)
-             (log/debug "Resubscribed to topics" @topics)))))
-   :on-connection-lost (fn [& args]
-                         (log/debug ::on-connection-lost {:args args}))
-   :on-delivery-complete (fn [& args]
-                           (log/debug ::on-delivery-complete {:args args}))
-   :on-unhandled-message (fn [& args]
-                           (log/debug ::on-unhandled-message {:args args}))})
+  (merge #?(:clj  {:on-connect-complete
+                   (fn [& args]
+                     (log/debug ::on-connect-complete "Connection completed")
+                     (let [{:keys [topics on-message]} mqtt-client]
+                       (when-not (empty? @topics)
+                         (do (subscribe mqtt-client @topics)
+                             (log/debug "Resubscribed to topics" @topics)))))
+                   :on-connection-lost (fn [& args]
+                                         (log/debug ::on-connection-lost {:args args}))
+                   :on-delivery-complete (fn [& args]
+                                           (log/debug ::on-delivery-complete {:args args}))
+                   :on-unhandled-message (fn [& args]
+                                           (log/debug ::on-unhandled-message {:args args}))}
+            :cljs {:on-success (fn [resp]
+                                 (log/debug ::onSuccess "Connection completed" {:resp resp}))
+                   :on-failure (fn [resp]
+                                 (log/debug ::onFailure "Connection failed" {:resp resp}))
+                   :on-connection-lost (fn [resp]
+                                         (log/debug ::on-connection-lost
+                                                    (merge {:resp resp
+                                                            :error-code (.-errorCode resp)}
+                                                           (if-not (zero? (.-errorCode resp))
+                                                             {:error-message (.-errorMessage resp)}))))})
+         (get-in mqtt-client [:config :default-options])))
 
 
 
 ;; transit reader/writer from/to string, since
 ;; mosquitto does not know anything about transit
 (defn- ->transit [v]
-  (let [out (ByteArrayOutputStream. 4096)]
-    (transit/write (transit/writer out :json {:handlers write-handlers}) v)
-    (.toString out "utf-8")))
+  #?(:clj  (let [out (ByteArrayOutputStream. 4096)]
+             (transit/write (transit/writer out :json {:handlers write-handlers}) v)
+             (.toString out "utf-8"))
+     :cljs (transit/write writer v)))
 
-(defn- <-transit [b]
-  (try
-    (transit/read (transit/reader (ByteArrayInputStream. b) :json))
-    (catch Exception e
-      (do (log/warn "Message not in transit format")
-          (apply str (map char b))))))
+(defn- <-transit [v]
+  #?(:clj  (try
+             (transit/read (transit/reader (ByteArrayInputStream. v) :json))
+             (catch Exception e
+               (do (log/warn "Message not in transit format")
+                   (apply str (map char v)))))
+     :cljs (transit/read reader v)))
 
 
 (defn- on-message
   "Handle incoming message from the MQTT broker."
   [mqtt-client]
-  (fn
-    [^String topic _ ^bytes payload]
-    (let [injections (-> mqtt-client
-                         (select-keys (:injection-ks mqtt-client))
-                         (assoc :mqtt-client mqtt-client))]
-      (handle-message (merge {:message/topic topic}
-                             (<-transit payload)
-                             injections)))))
+  #?(:clj  (fn [^String topic _ ^bytes payload]
+             (let [injections (-> mqtt-client
+                                  (select-keys (:injection-ks mqtt-client))
+                                  (assoc :mqtt-client mqtt-client))]
+               (handle-message (merge {:message/topic topic}
+                                      (<-transit payload)
+                                      injections))))
+     :cljs (fn [message]
+             (let [injections (-> mqtt-client
+                                  (select-keys (:injection-ks mqtt-client))
+                                  (assoc :mqtt-client mqtt-client))
+                   ;; advanced compilation did not like this being a js interop
+                   ;; manually grabbing the payload via goog.object/get to fix it
+                   payload-string (gobj/get message "payloadString")
+                   payload (<-transit payload-string)
+                   topic ^String (.-destinationName message)]
+               ;; uncomment for debugging. otherwise a bit too spammy
+               #_(log/debug ::on-message {:payload-string payload-string
+                                        :payload payload
+                                        :topic topic})
+               (handle-message (merge {:message/topic topic}
+                                      payload
+                                      injections))))))
 
 
 (defn- get-uri-string [{:keys [scheme host port]}]
   (str scheme "://" host ":" port))
 
 (defn- get-client-options [{:keys [config] :as mqtt-client}]
-  (let [{:keys [client-id options connect-options]} config]
-    (merge {:client-id (or client-id (mh/generate-id))}
-           options
-           {:opts (or connect-options {})}
-           (get-default-options mqtt-client))))
+  #?(:clj  (let [{:keys [client-id options connect-options]} config]
+             (merge {:client-id (or client-id (str (get-id)))}
+                    options
+                    {:opts (or connect-options {})}
+                    (get-default-options mqtt-client)))
+     :cljs (let [{:keys [on-connection-lost
+                         on-success
+                         on-failure]} (get-default-options mqtt-client)]
+             {:connection-options (clj->js (merge (:connect-options config)
+                                                  {:onSuccess on-success
+                                                   :onFailure on-failure}))
+              :on-connection-lost on-connection-lost})))
 
 (defn- connect* [{:keys [config] :as mqtt-client}]
   (log/info (str "Connecting to broker" (select-keys config [:schema :host :port])))
-  (let [client (mh/connect (get-uri-string config)
-                           (get-client-options mqtt-client))]
+  (let [client #?(:clj  (mh/connect (get-uri-string config)
+                                    (get-client-options mqtt-client))
+                  :cljs (let [client* ^Paho/Client (Paho/Client. (:host config)
+                                                                 (:port config)
+                                                                 (or (:client-id config)
+                                                                     (str (get-id))))
+                              {:keys [connection-options
+                                      on-connection-lost]} (get-client-options mqtt-client)]
+                          (.connect client* connection-options)
+                          (set! (.-onConnectionLost client*) on-connection-lost)
+                          client*))]
     (reset! (:client mqtt-client) client)))
 
 (defn disconnect* [{:keys [client config] :as _mqtt-client}]
   (when client
-    (mh/disconnect @client (:disconnect/timeout config))))
+    #?(:clj  (mh/disconnect @client (:disconnect/timeout config))
+       :cljs "FIX")))
 
 (defn- connected?* [{:keys [client] :as _mqtt-client}]
-  (mh/connected? @client))
+  #?(:clj  (mh/connected? @client)
+     :cljs (.isConnected @client)))
 
 (defn- publish*
   ([mqtt-client topic message]
    (publish mqtt-client topic message (get-in mqtt-client [:config :default-qos] 2)))
   ([{:keys [client message-counter] :as _mqtt-client} topic message qos]
-   (mh/publish @client
-               topic
-               (->transit (assoc message :message/id (swap! message-counter inc)))
-               qos)))
+   #?(:clj  (mh/publish @client
+                        topic
+                        (->transit (assoc message :message/id (swap! message-counter inc)))
+                        qos)
+      :cljs (let [counter (swap! message-counter inc)
+                  paho-message (-> message
+                                   (assoc :message/id counter)
+                                   (->transit)
+                                   (Paho/Message.))]
+              ;; for debugging purposes
+              #_(log/debug "DEBUG" {:counter counter
+                                    :message message
+                                    :applied (-> message
+                                                 (assoc :message/id counter))
+                                    :transit (-> message
+                                                 (assoc :message/id counter)
+                                                 (->transit))})
+              (set! (.-destinationName paho-message) topic)
+              (set! (.-qos paho-message) qos)
+              (.send @client paho-message)))))
 
 (defmethod handle-message :message/request [{:keys [mqtt-client
                                                     message/id
@@ -192,27 +261,50 @@
                 :topic/response (get-response-topic (:id mqtt-client))
                 :id (:id mqtt-client)
                 :message message*})
-    (mh/publish @client
-                (get-request-topic id)
-                (->transit message*)
-                qos)))
+    #?(:clj  (mh/publish @client
+                         (get-request-topic id)
+                         (->transit message*)
+                         qos)
+       :cljs (let [paho-message (-> message*
+                                    (->transit)
+                                    (Paho/Message.))]
+               (set! (.-destinationName paho-message) (get-request-topic id))
+               (set! (.-qos paho-message) qos)
+               (.send @client paho-message)))))
 
 (defn- subscribe*
   ([{:keys [client on-message] :as mqtt-client} topics]
    (log/info "Subscribing to" topics)
-   (mh/subscribe @client topics (on-message mqtt-client)))
+   #?(:clj  (mh/subscribe @client topics (on-message mqtt-client))
+      :cljs (doseq [[topic qos] topics]
+              ;; the implementation for js Paho MQTT does not allow
+              ;; for a message handler per topic. since the java version
+              ;; does, we do this, which is a bit suboptimal, but gathers
+              ;; everything in one place. the same goes for the other arity function
+              ;; for subscribe*
+              (set! (.-onMessageArrived @client) (on-message mqtt-client))
+              (.subscribe @client topic #js {:qos qos}))))
   ([{:keys [client on-message] :as mqtt-client} topic qos]
    (let [topics {topic qos}]
      (log/info "Subscribing to" topics)
-     (mh/subscribe @client topics (on-message mqtt-client)))))
+     #?(:clj  (mh/subscribe @client topics (on-message mqtt-client))
+        :cljs (do
+                (set! (.-onMessageArrived @client) (on-message mqtt-client))
+                (.subscribe @client topic #js {:qos qos}))))))
 
 (defn- unsubscribe* [{:keys [client] :as _mqtt-client} topics]
   (log/info "Unsubscribing from topics" topics)
-  (mh/unsubscribe @client topics))
+  #?(:clj  (mh/unsubscribe @client topics)
+     :cljs "FIX"))
 
 (defn check-timeouts [saved-requests]
   (let [now (t/now)]
     (doseq [[id {:keys [error-fn timestamp timeout]}] @saved-requests]
+      #_(log/debug {:id id
+                  :now now
+                  :timestamp timestamp
+                  :future (t/>> timestamp (t/new-duration timeout :millis))
+                  :true? (t/< now (t/>> timestamp (t/new-duration timeout :millis)))})
       (when (t/< now (t/>> timestamp (t/new-duration timeout :millis)))
         (error-fn {:message/id id})
         (swap! saved-requests dissoc id)))))
@@ -223,7 +315,7 @@
       (let [[v ch] (async/alts! [c tc])]
         ;; uncomment for debugging, otherwise leave alone.
         ;; super spammy
-        #_(log/debug {:v v
+        (log/debug {:v v
                     :ch ch})
         (cond (and (identical? ch c)
                    (= v :close!))
@@ -233,10 +325,11 @@
               :else
               (do (try
                     (check-timeouts saved-requests)
-                    (catch #?(:clj Exception :cljs js/Error) e
-                      (log/warn ::handle-timeout {:exception e
-                                                  :data (ex-data e)
-                                                  :message (ex-message e)})))
+                    (catch #?@(:clj  [Exception e]
+                               :cljs [js/Error e])
+                        (log/warn ::handle-timeout {:exception e
+                                                    :data (ex-data e)
+                                                    :message (ex-message e)})))
                   (recur (async/timeout timeout-in-ms))))))
     c))
 
@@ -259,7 +352,6 @@
     (if client
       this
       (do (log/info "Starting MQTT client")
-          (log/info (str "Connecting to broker" (select-keys config [:schema :host :port])))
           (let [id (get config :id (get-id))
                 saved-requests* (atom {})
                 new-this (assoc this

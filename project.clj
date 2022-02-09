@@ -1,21 +1,33 @@
 (defproject songpark-mqtt "0.1.0-SNAPSHOT"
   :description "MQTT library for Songpark"
 
-  :dependencies [[org.clojure/clojure "1.10.3"]
+  :dependencies [;; clojure
+                 [org.clojure/clojure "1.10.3" :scope "provided"]
+
+                 ;; structure
+                 [com.stuartsierra/component "1.0.0" :scope "provided"]
+
                  ;; time
-                 [tick "0.5.0-RC1"]
+                 [tick "0.5.0-RC5"]
+
                  ;; core async. used for request/response pattern
                  [org.clojure/core.async "1.5.648"]
+
                  ;; logging
                  [com.taoensso/timbre "5.1.2" :scope "provided"]
-                 ;; clojure mqtt
-                 [clojurewerkz/machine_head "1.0.0"]
-                 ;; clojurescript mqtt
-                 [cljsjs/paho "1.0.3-0"]
-                 [songpark/common "0.1.1-SNAPSHOT"]]
 
-  :repl-options {:init-ns songpark-mqtt.core}
+                 ;; client id on MQTT
+                 [nano-id "1.0.0"]
+
+                 [clojurewerkz/machine_head "1.0.0"]
+
+                 ;; transit
+                 [com.cognitect/transit-clj "1.0.324"]
+                 [cheshire "5.10.0"]]
+
+  :repl-options {:init-ns songpark.mqtt}
+
+  :plugins [[lein-auto "0.1.3"]]
+
   :profiles {:dev {:dependencies [[clj-commons/spyscope "0.1.48"]]
-                   :injections [(require 'spyscope.core)]
-                   :plugins [[lein-cljsbuild "1.1.8"]
-                             [lein-auto "0.1.3"]]}})
+                   :injections [(require 'spyscope.core)]}})

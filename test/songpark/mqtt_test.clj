@@ -44,34 +44,34 @@
   (let [client (atom nil)]
     (reset! client (init-client))
     (testing "start"
-      (is (not (nil? (-> @client :client)))))
+      (is (not (nil? @(-> @client :client)))))
     (testing "connected?"
-      (mqtt/connected? @client))
+      (is (true? (mqtt/connected? @client))))
     (testing "publish"
-      (is (nil? (mqtt/publish @client "test" {:foo true}))))
+      (is (nil? (mqtt/publish @client "testclj" {:foo true :client :clj}))))
     (testing "subscribe singular"
-      (mqtt/subscribe @client "test" 0)
-      (is (zero? (get @(:topics @client) "test"))))
+      (mqtt/subscribe @client "testclj" 0)
+      (is (zero? (get @(:topics @client) "testclj"))))
     (testing "subscribe plural"
-      (let [new-topics {"test1" 2
-                        "test2" 2
-                        "test/foo" 1}]
+      (let [new-topics {"testclj1" 2
+                        "testclj2" 2
+                        "testclj/foo" 1}]
         (mqtt/subscribe @client new-topics)
         (is (= (select-keys @(:topics @client) (keys new-topics)) new-topics))))
     (testing "catch"
-      (let [msg {:message/type :foo :foo true}]
-        (mqtt/publish @client "test" msg)
+      (let [msg {:message/type :foo :foo true :client :clj}]
+        (mqtt/publish @client "testclj" msg)
         ;; sleep for 200ms to catch the message
         (Thread/sleep 200)
         (is (= (select-keys @catch (keys msg)) msg))))
     (testing "message counter works"
-      (let [msg {:message/type :foo :foo true}]
-        (mqtt/publish @client "test" msg)
+      (let [msg {:message/type :foo :foo true :client :clj}]
+        (mqtt/publish @client "testclj" msg)
         ;; sleep for 200ms to catch the message
         (Thread/sleep 200)
         (is (number? (:message/id @catch)))))
     (testing "request/response happy path"
-      (let [msg {:message/type :reply :bar :baz}
+      (let [msg {:message/type :reply :bar :baz :client :clj}
             reply-catch (atom nil)
             success (fn [returned-message]
                       (reset! reply-catch (select-keys returned-message (keys reply-message))))]
@@ -79,7 +79,7 @@
         (Thread/sleep 200)
         (is (= @reply-catch reply-message))))
     (testing "request/response timeout"
-      (let [msg {:message/type :reply-and-sleep :sleep 1000}
+      (let [msg {:message/type :reply-and-sleep :sleep 1000 :client :clj}
             reply-catch (atom nil)
             success (fn [returned-message]
                       (reset! reply-catch (select-keys returned-message (keys reply-message))))
