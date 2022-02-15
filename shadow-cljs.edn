@@ -16,9 +16,6 @@
                 ;; logging
                 [com.taoensso/timbre "5.1.2"]
 
-                ;; ;; client id on MQTT
-                ;; [nano-id "1.0.0"]
-
                 ;; transit
                 [com.cognitect/transit-cljs "0.8.269"]]
 
