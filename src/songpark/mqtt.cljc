@@ -299,7 +299,11 @@
 (defn- unsubscribe* [{:keys [client] :as _mqtt-client} topics]
   (log/info "Unsubscribing from topics" topics)
   #?(:clj  (mh/unsubscribe @client topics)
-     :cljs "FIX"))
+     :cljs (doseq [topic topics]
+             (.unsubscribe @client topic #js {:timeout 10
+                                              :onFailure (fn [& args]
+                                                           (log/info "Unsuccessfully unsubscribed" {:topics topics
+                                                                                                    :args args}))}))))
 
 (defn check-timeouts
   "Saved requests from the request* function. max-time-in-ms is the maximum time allowed before a request is considered timed out, regardless of the timeout."
@@ -423,12 +427,12 @@
     (do (swap! topics assoc topic qos)
         (subscribe* this topic qos)))
   (unsubscribe [this topic-or-topics]
-    (let [topics* (if (map? topic-or-topics)
+    (let [topics* (if (sequential? topic-or-topics)
                     topic-or-topics
-                    {topic-or-topics (get @topics topic-or-topics)})]
+                    [topic-or-topics])]
       (doseq [k topics*]
         (swap! topics dissoc k))
-      (unsubscribe* client topics*))))
+      (unsubscribe* this topics*))))
 
 
 (defn mqtt-client [settings]

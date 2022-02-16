@@ -127,6 +127,23 @@
           (<! (timeout 500))
           
           (is (= @reply-catch-timeout {:timeout? true}))))
+      (testing "unsubscribe singular"
+        (let [topics (-> client
+                         deref
+                         :topics
+                         deref
+                         (dissoc "testcljs1"))]
+          (mqtt/unsubscribe @client "testcljs1")
+          (is (= @(:topics @client) topics))))
+      (testing "unsubscribe plural"
+        (let [topics (-> client
+                         deref
+                         :topics
+                         deref
+                         (dissoc "testcljs2")
+                         (dissoc "testcljs/foo"))]
+          (mqtt/unsubscribe @client ["testcljs2" "testcljs/foo"])
+          (is (= @(:topics @client) topics))))
       (testing "stop"
         ;; sleep for 1000ms to catch the message
         (<! (timeout 1000))

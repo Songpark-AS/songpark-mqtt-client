@@ -88,5 +88,22 @@
         (mqtt/request @client (:id @client) msg success error 200)
         (Thread/sleep 500)
         (is (= @reply-catch {:timeout? true}))))
+    (testing "unsubscribe singular"
+      (let [topics (-> client
+                       deref
+                       :topics
+                       deref
+                       (dissoc "testclj1"))]
+        (mqtt/unsubscribe @client "testclj1")
+        (is (= @(:topics @client) topics))))
+    (testing "unsubscribe plural"
+      (let [topics (-> client
+                       deref
+                       :topics
+                       deref
+                       (dissoc "testclj2")
+                       (dissoc "testclj/foo"))]
+        (mqtt/unsubscribe @client ["testclj2" "testclj/foo"])
+        (is (= @(:topics @client) topics))))
     (testing "stop"
       (is (nil? (-> (stop @client) :client))))))
