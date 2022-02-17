@@ -103,10 +103,8 @@
           ;; the network traffic to happen, and then let the nodejs single thread
           ;; continue with its work before it gets trapped in a timeout (again),
           ;; allowing it to run any callbacks before continuing with the the code below
-          (<! (timeout 500))
-          (<! (timeout 500))
-          (<! (timeout 500))
-          (<! (timeout 500))
+          (doseq [_ (range 5)]
+            (<! (timeout 200)))
           
           (is (= @reply-catch reply-message))))
       (testing "request/response timeout"
@@ -123,8 +121,8 @@
           ;; the network traffic to happen, and then let the nodejs single thread
           ;; continue with its work before it gets trapped in a timeout (again),
           ;; allowing it to run any callbacks before continuing with the the code below
-          (<! (timeout 500))
-          (<! (timeout 500))
+          (doseq [_ (range 5)]
+            (<! (timeout 200)))
           
           (is (= @reply-catch-timeout {:timeout? true}))))
       (testing "unsubscribe singular"
@@ -144,8 +142,24 @@
                          (dissoc "testcljs/foo"))]
           (mqtt/unsubscribe @client ["testcljs2" "testcljs/foo"])
           (is (= @(:topics @client) topics))))
+      (testing "clean message"
+        (let [msg {:message/type :reply/cljs :clean? true :client :cljs}
+              reply-catch (atom nil)
+              success (fn [returned-message]
+                        (log/debug returned-message)
+                        (reset! reply-catch returned-message))
+              error (fn [error]
+                      (log/debug "MEH!")
+                      (reset! reply-catch error))]
+          (mqtt/request @client (:id @client) msg success error 500)
+          (doseq [_ (range 5)]
+            (<! (timeout 200)))
+          (is (= (-> (mqtt/clean-message @client @reply-catch)
+                     (dissoc :message/type :message/id :message/topic :message.response/to-id))
+                 reply-message))))
       (testing "stop"
         ;; sleep for 1000ms to catch the message
-        (<! (timeout 1000))
+        (doseq [_ (range 5)]
+          (<! (timeout 200)))
         (is (nil? (-> (stop @client) :client))))
       )))

@@ -27,11 +27,12 @@
   (log/warn ::handle-message :default msg))
 
 (defprotocol IMqttClient
-  (connected? [this])
-  (publish [this topic message] [this topic message qos])
-  (request [this id message success-fn error-fn timeout] [this id message success-fn error-fn timeout qos])
-  (subscribe [this topics] [this topic qos])
-  (unsubscribe [this topic-or-topics]))
+  (connected? [this] "Check if we are connected")
+  (publish [this topic message] [this topic message qos] "Publish to the topic")
+  (request [this id message success-fn error-fn timeout] [this id message success-fn error-fn timeout qos] "Send a request to an id (will be converted to a topic) and get a response in the success-fn provided. If timed out, the error fn is run instead.")
+  (subscribe [this topics] [this topic qos] "Subscribe to topic")
+  (unsubscribe [this topic-or-topics] "Unsubscribe from topic")
+  (clean-message [this message] "Clean message from any injections like mqtt-client or injection-ks"))
 
 (extend-protocol IMqttClient
   nil
@@ -305,6 +306,9 @@
                                                            (log/info "Unsuccessfully unsubscribed" {:topics topics
                                                                                                     :args args}))}))))
 
+(defn- clean-message* [{:keys [injection-ks] :as _mqtt-client} message]
+  (apply dissoc message (conj (or injection-ks []) :mqtt-client)))
+
 (defn check-timeouts
   "Saved requests from the request* function. max-time-in-ms is the maximum time allowed before a request is considered timed out, regardless of the timeout."
   [saved-requests max-time-in-ms]
@@ -316,10 +320,10 @@
                   :timestamp timestamp
                   :max-time-in-ms max-time-in-ms
                   :future (t/>> timestamp (t/new-duration timeout :millis))
-                  :true? (t/< now (t/>> timestamp (t/new-duration timeout :millis)))})
+                  :true? (t/> now (t/>> timestamp (t/new-duration timeout :millis)))})
       ;; have we timed out? then run error-fn
-      (when (or (t/< now (t/>> timestamp (t/new-duration timeout :millis)))
-                (t/< now (t/>> timestamp (t/new-duration max-time-in-ms :millis))))
+      (when (or (t/> now (t/>> timestamp (t/new-duration timeout :millis)))
+                (t/> now (t/>> timestamp (t/new-duration max-time-in-ms :millis))))
         #_(log/debug :check-timeouts "Running cleanup of requests" {:error-fn error-fn
                                                                   :now now
                                                                   :id id
@@ -432,7 +436,9 @@
                     [topic-or-topics])]
       (doseq [k topics*]
         (swap! topics dissoc k))
-      (unsubscribe* this topics*))))
+      (unsubscribe* this topics*)))
+  (clean-message [this message]
+    (clean-message* this message)))
 
 
 (defn mqtt-client [settings]

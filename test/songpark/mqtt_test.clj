@@ -105,5 +105,18 @@
                        (dissoc "testclj/foo"))]
         (mqtt/unsubscribe @client ["testclj2" "testclj/foo"])
         (is (= @(:topics @client) topics))))
+    (testing "clean message"
+      (let [msg {:message/type :reply :clean? true :client :clj}
+            reply-catch (atom nil)
+            success (fn [returned-message]
+                      (log/debug returned-message)
+                      (reset! reply-catch returned-message))
+            error (fn [error]
+                    (reset! reply-catch error))]
+        (mqtt/request @client (:id @client) msg success error 900)
+        (Thread/sleep 1000)
+        (is (= (-> (mqtt/clean-message @client @reply-catch)
+                   (dissoc :message/type :message/id :message/topic :message.response/to-id))
+               reply-message))))
     (testing "stop"
       (is (nil? (-> (stop @client) :client))))))
