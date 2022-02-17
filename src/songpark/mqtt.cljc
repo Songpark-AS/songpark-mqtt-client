@@ -8,6 +8,7 @@
             #?(:clj  [clojurewerkz.machine-head.client :as mh])
             #?(:clj  [songpark.mqtt.transit :refer [write-handlers]]
                :cljs [songpark.mqtt.transit :refer [writer reader]])
+            [songpark.mqtt.util :refer [broadcast-topic]]
             [taoensso.timbre :as log]
             [tick.core :as t])
   #?(:clj (:import [java.io ByteArrayInputStream ByteArrayOutputStream])))
@@ -29,6 +30,7 @@
 (defprotocol IMqttClient
   (connected? [this] "Check if we are connected")
   (publish [this topic message] [this topic message qos] "Publish to the topic")
+  (broadcast [this message] [this message qos] "Broadcast to anything that wants to know about this id broadcast topic")
   (request [this id message success-fn error-fn timeout] [this id message success-fn error-fn timeout qos] "Send a request to an id (will be converted to a topic) and get a response in the success-fn provided. If timed out, the error fn is run instead.")
   (subscribe [this topics] [this topic qos] "Subscribe to topic")
   (unsubscribe [this topic-or-topics] "Unsubscribe from topic")
@@ -40,13 +42,20 @@
     (throw (ex-info "Tried MQTT connected? with nil" {})))
   (publish
     ([this topic message]
-     (throw (ex-info "Tried MQTT send with nil" {:topic topic
+     (throw (ex-info "Tried MQTT publish with nil" {:topic topic
                                                  :message message})))
     
     ([this topic message qos]
-     (throw (ex-info "Tried MQTT send with nil" {:topic topic
+     (throw (ex-info "Tried MQTT publish with nil" {:topic topic
                                                  :qos qos
                                                  :message message}))))
+  (broadcast
+    ([this message]
+     (throw (ex-info "Tried MQTT broadcast with nil" {:message message})))
+    
+    ([this message qos]
+     (throw (ex-info "Tried MQTT broadcast with nil" {:qos qos
+                                                      :message message}))))
   (request
     ([this id message success-fn error-fn timeout]
      (throw (ex-info "Tried MQTT request with nil" {:id id
@@ -68,7 +77,10 @@
      (throw (ex-info "Tried MQTT subscribe with nil" {:topic topic
                                                       :qos qos}))))
   (unsubscribe [this topic-or-topics]
-    (throw (ex-info "Tried MQTT unsubscribe with nil" {:topic-or-topics topic-or-topics}))))
+    (throw (ex-info "Tried MQTT unsubscribe with nil" {:topic-or-topics topic-or-topics})))
+
+  (clean-message [this message]
+    (throw (ex-info "Tried MQTT clean-message with nil" {:message message}))))
 
 
 (defn get-default-options [mqtt-client]
@@ -213,6 +225,9 @@
               (set! (.-destinationName paho-message) topic)
               (set! (.-qos paho-message) qos)
               (.send @client paho-message)))))
+
+(defn- broadcast* [{:keys [id] :as mqtt-client} message qos]
+  (publish mqtt-client (broadcast-topic id) message qos))
 
 (defmethod handle-message :message/request [{:keys [mqtt-client
                                                     message/id
@@ -420,6 +435,10 @@
     (publish* this topic message))
   (publish [this topic message qos]
     (publish* this topic message qos))
+  (broadcast [this message]
+    (broadcast* this message (get config :default-qos 2)))
+  (broadcast [this message qos]
+    (broadcast* this message qos))
   (request [this id message success-fn error-fn timeout]
     (request* this id message success-fn error-fn timeout (get config :default-qos 2)))
   (request [this id message success-fn error-fn timeout qos]

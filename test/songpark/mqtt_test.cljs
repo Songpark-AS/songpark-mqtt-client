@@ -2,6 +2,7 @@
   (:require [clojure.core.async :as async :refer [go timeout <!]]
             [com.stuartsierra.component :as component]
             [songpark.mqtt :as mqtt]
+            [songpark.mqtt.util :refer [broadcast-topic]]
             [taoensso.timbre :as log]
             [cljs.test :include-macros true :refer [deftest
                                                     is
@@ -157,6 +158,14 @@
           (is (= (-> (mqtt/clean-message @client @reply-catch)
                      (dissoc :message/type :message/id :message/topic :message.response/to-id))
                  reply-message))))
+      (testing "broadcast"
+        (let [msg {:message/type :foo/cljs :broadcast true :client :cljs}]
+          (mqtt/subscribe @client (broadcast-topic (:id @client)) 2)
+          (mqtt/broadcast @client msg)
+          ;; sleep for 200ms to catch the message
+          (doseq [_ (range 5)]
+            (<! (timeout 200)))
+          (is (= (select-keys @catch (keys msg)) msg))))
       (testing "stop"
         ;; sleep for 1000ms to catch the message
         (doseq [_ (range 5)]

@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [com.stuartsierra.component :as component]
             [songpark.mqtt :as mqtt]
+            [songpark.mqtt.util :refer [broadcast-topic]]
             [taoensso.timbre :as log]))
 
 
@@ -118,5 +119,12 @@
         (is (= (-> (mqtt/clean-message @client @reply-catch)
                    (dissoc :message/type :message/id :message/topic :message.response/to-id))
                reply-message))))
+    (testing "broadcast"
+      (let [msg {:message/type :foo :broadcast true :client :clj}]
+        (mqtt/subscribe @client (broadcast-topic (:id @client)) 2)
+        (mqtt/broadcast @client msg)
+        ;; sleep for 200ms to catch the message
+        (Thread/sleep 200)
+        (is (= (select-keys @catch (keys msg)) msg))))
     (testing "stop"
       (is (nil? (-> (stop @client) :client))))))
