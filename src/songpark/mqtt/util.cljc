@@ -8,3 +8,8 @@
 
 (defn teleporter-topic [id]
   (str id "/teleporter"))
+
+(defn heartbeat-topic
+  "For listening on the heartbeat of a Teleporter"
+  [id]
+  (str id "/heartbeat"))
