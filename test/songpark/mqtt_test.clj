@@ -10,6 +10,9 @@
 (def reply (atom nil))
 (def reply-message {:replied? true})
 
+(defmethod mqtt/handle-message :check-injection [msg]
+  (reset! catch (= (:injected? msg) true?)))
+
 (defmethod mqtt/handle-message :foo [msg]
   (reset! catch msg))
 (defmethod mqtt/handle-message :reply [{:keys [?reply-fn] :as msg}]
@@ -126,5 +129,24 @@
         ;; sleep for 200ms to catch the message
         (Thread/sleep 200)
         (is (= (select-keys @catch (keys msg)) msg))))
+
+    (testing "add injection"
+      (let [msg {:message/type :check-injection :client :clj}]
+        ;; add the function true? instead of true (which is a value)
+        (mqtt/add-injection @client :injected? true?)
+        (mqtt/publish @client "testclj" msg)
+        ;; sleep for 200ms to catch the message
+        (Thread/sleep 200)
+        (is (true? @catch))))
+
+    (testing "remove injection"
+      (let [msg {:message/type :check-injection :client :clj}]
+        ;; add the function true? instead of true (which is a value)
+        (mqtt/remove-injection @client :injected?)
+        (mqtt/publish @client "testclj" msg)
+        ;; sleep for 200ms to catch the message
+        (Thread/sleep 200)
+        (is (false? @catch))))
+    
     (testing "stop"
       (is (nil? (-> (stop @client) :client))))))

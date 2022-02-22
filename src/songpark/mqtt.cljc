@@ -28,13 +28,15 @@
   (log/warn ::handle-message :default msg))
 
 (defprotocol IMqttClient
-  (connected? [this] "Check if we are connected")
-  (publish [this topic message] [this topic message qos] "Publish to the topic")
-  (broadcast [this message] [this message qos] "Broadcast to anything that wants to know about this id broadcast topic")
-  (request [this id message success-fn error-fn timeout] [this id message success-fn error-fn timeout qos] "Send a request to an id (will be converted to a topic) and get a response in the success-fn provided. If timed out, the error fn is run instead.")
-  (subscribe [this topics] [this topic qos] "Subscribe to topic")
-  (unsubscribe [this topic-or-topics] "Unsubscribe from topic")
-  (clean-message [this message] "Clean message from any injections like mqtt-client or injection-ks"))
+  (connected? [client] "Check if we are connected")
+  (publish [client topic message] [client topic message qos] "Publish to the topic")
+  (broadcast [client message] [client message qos] "Broadcast to anything that wants to know about client id broadcast topic")
+  (request [client id message success-fn error-fn timeout] [client id message success-fn error-fn timeout qos] "Send a request to an id (will be converted to a topic) and get a response in the success-fn provided. If timed out, the error fn is run instead.")
+  (subscribe [client topics] [client topic qos] "Subscribe to topic")
+  (unsubscribe [client topic-or-topics] "Unsubscribe from topic")
+  (clean-message [client message] "Clean message from any injections like mqtt-client or injection-ks")
+  (add-injection [client k data])
+  (remove-injection [client k]))
 
 (extend-protocol IMqttClient
   nil
@@ -80,7 +82,14 @@
     (throw (ex-info "Tried MQTT unsubscribe with nil" {:topic-or-topics topic-or-topics})))
 
   (clean-message [this message]
-    (throw (ex-info "Tried MQTT clean-message with nil" {:message message}))))
+    (throw (ex-info "Tried MQTT clean-message with nil" {:message message})))
+
+  (add-injection [this k data]
+    (throw (ex-info "Tried to add injection with nil" {:k k
+                                                       :data data})))
+
+  (remove-injection [this k]
+    (throw (ex-info "Tried to remove injection with nil" {:k k}))))
 
 
 (defn get-default-options [mqtt-client]
@@ -136,15 +145,13 @@
   "Handle incoming message from the MQTT broker."
   [mqtt-client]
   #?(:clj  (fn [^String topic _ ^bytes payload]
-             (let [injections (-> mqtt-client
-                                  (select-keys (:injection-ks mqtt-client))
+             (let [injections (-> @(:injections mqtt-client)
                                   (assoc :mqtt-client mqtt-client))]
                (handle-message (merge {:message/topic topic}
                                       (<-transit payload)
                                       injections))))
      :cljs (fn [message]
-             (let [injections (-> mqtt-client
-                                  (select-keys (:injection-ks mqtt-client))
+             (let [injections (-> @(:injections mqtt-client)
                                   (assoc :mqtt-client mqtt-client))
                    ;; advanced compilation did not like this being a js interop
                    ;; manually grabbing the payload via goog.object/get to fix it
@@ -321,8 +328,8 @@
                                                            (log/info "Unsuccessfully unsubscribed" {:topics topics
                                                                                                     :args args}))}))))
 
-(defn- clean-message* [{:keys [injection-ks] :as _mqtt-client} message]
-  (apply dissoc message (conj (or injection-ks []) :mqtt-client)))
+(defn- clean-message* [{:keys [injections] :as _mqtt-client} message]
+  (apply dissoc message (conj (keys @injections) :mqtt-client)))
 
 (defn check-timeouts
   "Saved requests from the request* function. max-time-in-ms is the maximum time allowed before a request is considered timed out, regardless of the timeout."
@@ -387,7 +394,7 @@
 
 
 (defrecord MqttClient [config topics client id c-timeout
-                       injection-ks
+                       injections
                        on-message
                        on-connect-complete
                        on-connection-lost
@@ -457,10 +464,15 @@
         (swap! topics dissoc k))
       (unsubscribe* this topics*)))
   (clean-message [this message]
-    (clean-message* this message)))
+    (clean-message* this message))
+  (add-injection [this k data]
+    (swap! injections assoc k data))
+  (remove-injection [this k]
+    (swap! injections dissoc k)))
 
 
 (defn mqtt-client [settings]
   (map->MqttClient (merge
-                    {:on-message on-message}
+                    {:on-message on-message
+                     :injections (atom {})}
                     (assoc-in settings [:config :disconnect/timeout] 10))))
