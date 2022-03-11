@@ -1,4 +1,4 @@
-(defproject songpark/mqtt "1.0.1-alpha1"
+(defproject songpark/mqtt "1.0.1"
   :description "MQTT library for Songpark"
 
   :dependencies [;; clojure
