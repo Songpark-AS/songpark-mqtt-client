@@ -476,3 +476,4 @@
                     {:on-message on-message
                      :injections (atom {})}
                     (assoc-in settings [:config :disconnect/timeout] 10))))
+
