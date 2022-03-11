@@ -179,7 +179,20 @@
      :cljs (let [{:keys [on-connection-lost
                          on-success
                          on-failure]} (get-default-options mqtt-client)]
-             {:connection-options (clj->js (merge (:connect-options config)
+             {:connection-options (clj->js (merge (select-keys config [:reconnect
+                                                                       :useSSL
+                                                                       :userName
+                                                                       :password
+                                                                       :keepAliveInterval
+                                                                       :cleanSession
+                                                                       :willMessage
+                                                                       :invocationContext
+                                                                       :timeout
+                                                                       :hosts
+                                                                       :ports
+                                                                       :mqttVersion
+                                                                       :mqttVersionExplicit
+                                                                       :uris])
                                                   {:onSuccess on-success
                                                    :onFailure on-failure}))
               :on-connection-lost on-connection-lost})))
@@ -202,7 +215,7 @@
 (defn disconnect* [{:keys [client config] :as _mqtt-client}]
   (when client
     #?(:clj  (mh/disconnect @client (:disconnect/timeout config))
-       :cljs "FIX")))
+       :cljs (.disconnect @client))))
 
 (defn- connected?* [{:keys [client] :as _mqtt-client}]
   #?(:clj  (mh/connected? @client)
@@ -279,7 +292,7 @@
                         :message.response/topic (get-response-topic (:id mqtt-client))
                         :message/type :message/request
                         :message.type/real msg-type)]
-    ;; TODO: Save request for timeout
+    ;; Save request for timeout
     (swap! saved-requests assoc msg-id {:success-fn success-fn
                                         :error-fn error-fn
                                         :timestamp (t/now)
