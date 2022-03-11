@@ -95,27 +95,27 @@
 (defn get-default-options [mqtt-client]
   (merge #?(:clj  {:on-connect-complete
                    (fn [& args]
-                     (log/debug ::on-connect-complete "Connection completed")
+                     (log/info ::on-connect-complete "Connection completed")
                      (let [{:keys [topics on-message]} mqtt-client]
                        (when-not (empty? @topics)
                          (do (subscribe mqtt-client @topics)
                              (log/debug "(re-)subscribed to topics" @topics)))))
                    :on-connection-lost (fn [& args]
-                                         (log/debug ::on-connection-lost {:args args}))
+                                         (log/info ::on-connection-lost {:args args}))
                    :on-delivery-complete (fn [& args]
-                                           (log/debug ::on-delivery-complete {:args args}))
+                                           (log/info ::on-delivery-complete {:args args}))
                    :on-unhandled-message (fn [& args]
-                                           (log/debug ::on-unhandled-message {:args args}))}
+                                           (log/info ::on-unhandled-message {:args args}))}
             :cljs {:on-success (fn [resp]
-                                 (log/debug ::onSuccess "Connection completed" {:resp resp})
+                                 (log/info ::onSuccess "Connection completed" {:resp resp})
                                  (let [{:keys [topics on-message]} mqtt-client]
                                    (when-not (empty? @topics)
                                      (do (subscribe mqtt-client @topics)
-                                         (log/debug "(re-)subscribed to topics" @topics)))))
+                                         (log/info "(re-)subscribed to topics" @topics)))))
                    :on-failure (fn [resp]
-                                 (log/debug ::onFailure "Connection failed" {:resp resp}))
+                                 (log/info ::onFailure "Connection failed" {:resp resp}))
                    :on-connection-lost (fn [resp]
-                                         (log/debug ::on-connection-lost
+                                         (log/info ::on-connection-lost
                                                     (merge {:resp resp
                                                             :error-code (.-errorCode resp)}
                                                            (if-not (zero? (.-errorCode resp))
