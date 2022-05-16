@@ -46,7 +46,7 @@
     ([this topic message]
      (throw (ex-info "Tried MQTT publish with nil" {:topic topic
                                                  :message message})))
-    
+
     ([this topic message qos]
      (throw (ex-info "Tried MQTT publish with nil" {:topic topic
                                                  :qos qos
@@ -54,7 +54,7 @@
   (broadcast
     ([this message]
      (throw (ex-info "Tried MQTT broadcast with nil" {:message message})))
-    
+
     ([this message qos]
      (throw (ex-info "Tried MQTT broadcast with nil" {:qos qos
                                                       :message message}))))
@@ -483,10 +483,12 @@
   (remove-injection [this k]
     (swap! injections dissoc k)))
 
+(defmethod clojure.core/print-method MqttClient [data ^java.io.Writer writer]
+  (.write writer "#<MQTT Client>"))
+
 
 (defn mqtt-client [settings]
   (map->MqttClient (merge
                     {:on-message on-message
                      :injections (atom {})}
                     (assoc-in settings [:config :disconnect/timeout] 10))))
-
