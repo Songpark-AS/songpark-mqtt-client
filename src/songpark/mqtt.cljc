@@ -29,7 +29,7 @@
 
 (defprotocol IMqttClient
   (connected? [client] "Check if we are connected")
-  (publish [client topic message] [client topic message qos] "Publish to the topic")
+  (publish [client topic-or-id message] [client topic-or-id message qos] "Publish to the topic")
   (broadcast [client message] [client message qos] "Broadcast to anything that wants to know about client id broadcast topic")
   (request [client id message success-fn error-fn timeout] [client id message success-fn error-fn timeout qos] "Send a request to an id (will be converted to a topic) and get a response in the success-fn provided. If timed out, the error fn is run instead.")
   (subscribe [client topics] [client topic qos] "Subscribe to topic")
@@ -43,14 +43,14 @@
   (connected? [this]
     (throw (ex-info "Tried MQTT connected? with nil" {})))
   (publish
-    ([this topic message]
-     (throw (ex-info "Tried MQTT publish with nil" {:topic topic
-                                                 :message message})))
+    ([this topic-or-id message]
+     (throw (ex-info "Tried MQTT publish with nil" {:topic-or-id topic-or-id
+                                                    :message message})))
 
-    ([this topic message qos]
-     (throw (ex-info "Tried MQTT publish with nil" {:topic topic
-                                                 :qos qos
-                                                 :message message}))))
+    ([this topic-or-id message qos]
+     (throw (ex-info "Tried MQTT publish with nil" {:topic-or-id topic-or-id
+                                                    :qos qos
+                                                    :message message}))))
   (broadcast
     ([this message]
      (throw (ex-info "Tried MQTT broadcast with nil" {:message message})))
@@ -222,29 +222,32 @@
      :cljs (.isConnected @client)))
 
 (defn- publish*
-  ([mqtt-client topic message]
-   (publish mqtt-client topic message (get-in mqtt-client [:config :default-qos] 2)))
-  ([{:keys [client message-counter] :as _mqtt-client} topic message qos]
-   #?(:clj  (mh/publish @client
-                        topic
-                        (->transit (assoc message :message/id (swap! message-counter inc)))
-                        qos)
-      :cljs (let [counter (swap! message-counter inc)
-                  paho-message (-> message
-                                   (assoc :message/id counter)
-                                   (->transit)
-                                   (Paho/Message.))]
-              ;; for debugging purposes
-              #_(log/debug "DEBUG" {:counter counter
-                                    :message message
-                                    :applied (-> message
-                                                 (assoc :message/id counter))
-                                    :transit (-> message
-                                                 (assoc :message/id counter)
-                                                 (->transit))})
-              (set! (.-destinationName paho-message) topic)
-              (set! (.-qos paho-message) qos)
-              (.send @client paho-message)))))
+  ([mqtt-client topic-or-id message]
+   (publish* mqtt-client topic-or-id message (get-in mqtt-client [:config :default-qos] 2)))
+  ([{:keys [client message-counter] :as _mqtt-client} topic-or-id message qos]
+   (let [topic (if (uuid? topic-or-id)
+                 (str topic-or-id "/request")
+                 topic-or-id)]
+     #?(:clj  (mh/publish @client
+                          topic
+                          (->transit (assoc message :message/id (swap! message-counter inc)))
+                          qos)
+        :cljs (let [counter (swap! message-counter inc)
+                    paho-message (-> message
+                                     (assoc :message/id counter)
+                                     (->transit)
+                                     (Paho/Message.))]
+                ;; for debugging purposes
+                #_(log/debug "DEBUG" {:counter counter
+                                      :message message
+                                      :applied (-> message
+                                                   (assoc :message/id counter))
+                                      :transit (-> message
+                                                   (assoc :message/id counter)
+                                                   (->transit))})
+                (set! (.-destinationName paho-message) topic)
+                (set! (.-qos paho-message) qos)
+                (.send @client paho-message))))))
 
 (defn- broadcast* [{:keys [id] :as mqtt-client} message qos]
   (publish mqtt-client (broadcast-topic id) message qos))
@@ -451,10 +454,10 @@
   IMqttClient
   (connected? [this]
     (connected?* this))
-  (publish [this topic message]
-    (publish* this topic message))
-  (publish [this topic message qos]
-    (publish* this topic message qos))
+  (publish [this topic-or-id message]
+    (publish* this topic-or-id message))
+  (publish [this topic-or-id message qos]
+    (publish* this topic-or-id message qos))
   (broadcast [this message]
     (broadcast* this message (get config :default-qos 2)))
   (broadcast [this message qos]
