@@ -486,8 +486,8 @@
   (remove-injection [this k]
     (swap! injections dissoc k)))
 
-(defmethod clojure.core/print-method MqttClient [data ^java.io.Writer writer]
-  (.write writer "#<MQTT Client>"))
+#?(:clj (defmethod clojure.core/print-method MqttClient [data ^java.io.Writer writer]
+          (.write writer "#<MQTT Client>")))
 
 
 (defn mqtt-client [settings]
