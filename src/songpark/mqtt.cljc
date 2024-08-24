@@ -36,7 +36,9 @@
   (unsubscribe [client topic-or-topics] "Unsubscribe from topic")
   (clean-message [client message] "Clean message from any injections like mqtt-client or injection-ks")
   (add-injection [client k data])
-  (remove-injection [client k]))
+  (remove-injection [client k])
+  (disconnect [client])
+  (connect [client]))
 
 (extend-protocol IMqttClient
   nil
@@ -454,6 +456,16 @@
   IMqttClient
   (connected? [this]
     (connected?* this))
+  (connect [this]
+    (if (connected? this)
+      false
+      (do (connect* this)
+          true)))
+  (disconnect [this]
+    (if-not (connected? this)
+      true
+      (do (disconnect* this)
+          true)))
   (publish [this topic-or-id message]
     (publish* this topic-or-id message))
   (publish [this topic-or-id message qos]
